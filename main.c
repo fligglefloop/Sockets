@@ -9,8 +9,8 @@
 #include <sys/socket.h>
 #include <poll.h>
 
-#define SERVER_IP "192.168.0.206"
-#define SERVER_PORT 50000
+//#define SERVER_IP "192.168.0.206"
+//#define SERVER_PORT 50000
 #define BUFFER_SIZE 1024
 #define TIMEOUT_MS 2
 
@@ -43,7 +43,10 @@ void update_state(client_state_t state) {
     printf("State change: %s\n", state_name[state]);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    argc--;
+    char *server_ip = "192.168.0.206";
+    int server_port = 50000;
     int sockfd;
     struct sockaddr_in server_addr;
     struct pollfd pfd;
@@ -53,6 +56,11 @@ int main() {
     const char *msg = "Hello, Server!";
     ssize_t msg_len = strlen(msg);
     int connect_started = 0;
+
+    if (argc > 0) {
+        server_ip = argv[1];
+        server_port = atoi(argv[2]);
+    }
 
     // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -71,8 +79,11 @@ int main() {
     // Setup server address
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(SERVER_PORT);
-    inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
+    server_addr.sin_port = htons(server_port);
+    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) < 1) {
+        perror("inet_pton");
+        exit(EXIT_FAILURE);
+    }
 
     pfd.fd = sockfd;
     update_state(STATE_CONNECTING);
