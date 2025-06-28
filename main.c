@@ -9,8 +9,6 @@
 #include <sys/socket.h>
 #include <poll.h>
 
-//#define SERVER_IP "192.168.0.206"
-//#define SERVER_PORT 50000
 #define BUFFER_SIZE 1024
 #define TIMEOUT_MS 2
 
@@ -44,23 +42,28 @@ void update_state(client_state_t state) {
 }
 
 int main(int argc, char **argv) {
-    argc--;
     char *server_ip = "192.168.0.206";
     int server_port = 50000;
     int sockfd;
     struct sockaddr_in server_addr;
     struct pollfd pfd;
-    int pong = 0;
-
+    int pong = 1;
+    int base_args = 1;
     char buffer[BUFFER_SIZE] = {0};
     const char *msg = "Hello, Server!";
     ssize_t msg_len = strlen(msg);
     int connect_started = 0;
+    int num_packets = 20;
 
-    if (argc > 0) {
+    // Handle cli args
+    if (argc > base_args) {
         server_ip = argv[1];
         server_port = atoi(argv[2]);
+        num_packets = atoi(argv[3]);
     }
+
+    printf("Server ip: %s\n", server_ip);
+    printf("Server port: %d\n\n", server_port);
 
     // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -85,13 +88,12 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    // Update state to start machine
     pfd.fd = sockfd;
     update_state(STATE_CONNECTING);
     while (g_client_state != STATE_DONE && g_client_state != STATE_ERROR) {
-        // printf("Current state: ");
         switch (g_client_state) {
             case STATE_CONNECTING:
-                // printf("CONNECTING\n");
                 if (!connect_started) {
                     int ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr));
                     if (ret < 0) {
@@ -109,12 +111,10 @@ int main(int argc, char **argv) {
                 break;
 
             case STATE_WRITING:
-                // printf("WRITING\n");
                 pfd.events = POLLOUT;
                 break;
 
             case STATE_READING:
-                // printf("READING\n");
                 pfd.events = POLLIN;
                 break;
 
@@ -123,10 +123,10 @@ int main(int argc, char **argv) {
                 break;
         }
 
+        // Poll socket
         const int ret = poll(&pfd, 1, TIMEOUT_MS);
         if (ret < 0) {
             perror("poll");
-            // g_client_state = STATE_ERROR;
             update_state(STATE_ERROR);
             break;
         }else if (ret == 0) {
@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
             continue;  // just loop again
         }
 
-
+        // Check for error events
         if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
             fprintf(stderr, "Socket error or hangup\n");
             // g_client_state = STATE_ERROR;
@@ -144,6 +144,7 @@ int main(int argc, char **argv) {
             break;
         }
 
+        // Handle socket event
         switch (g_client_state) {
             case STATE_CONNECTING: {
                 if (pfd.revents & POLLOUT) {
@@ -171,7 +172,7 @@ int main(int argc, char **argv) {
                         // g_client_state = STATE_ERROR;
                         update_state(STATE_ERROR);
                     } else {
-                        printf("Wrote %zu bytes.\n", sent);
+                        printf("Bytes Wrote: %zu\n", sent);
                         // g_client_state = STATE_READING;
                         update_state(STATE_READING);
                     }
@@ -187,7 +188,6 @@ int main(int argc, char **argv) {
                         printf("Pong: %d\n", pong);
                         printf("Bytes Read: %zu\n", n);
                         printf("Received: %s\n", buffer);
-                        int num_packets = 2000000;//Move this
                         // g_client_state = STATE_DONE;
                         if (pong < num_packets) {
                             pong++;
@@ -212,9 +212,8 @@ int main(int argc, char **argv) {
                 break;
         }
     }
-
+    // Clean up
     close(sockfd);
     printf("Client exited with state: %s\n", g_client_state == STATE_DONE ? "DONE" : "ERROR");
-    printf("Received: %s\n", buffer);
     return (g_client_state == STATE_DONE) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
