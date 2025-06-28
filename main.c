@@ -12,7 +12,7 @@
 #define SERVER_IP "192.168.0.206"
 #define SERVER_PORT 50000
 #define BUFFER_SIZE 1024
-#define TIMEOUT_MS 0
+#define TIMEOUT_MS 2
 
 typedef enum {
     STATE_IDLE = 0,
@@ -32,7 +32,7 @@ char *state_name[] = {
     [STATE_ERROR] = "ERROR"
 };
 
-client_state_t g_client_state = STATE_CONNECTING;
+client_state_t g_client_state = STATE_IDLE;
 
 int set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -47,6 +47,7 @@ int main() {
     int sockfd;
     struct sockaddr_in server_addr;
     struct pollfd pfd;
+    int pong = 0;
 
     char buffer[BUFFER_SIZE] = {0};
     const char *msg = "Hello, Server!";
@@ -74,7 +75,7 @@ int main() {
     inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
 
     pfd.fd = sockfd;
-
+    update_state(STATE_CONNECTING);
     while (g_client_state != STATE_DONE && g_client_state != STATE_ERROR) {
         // printf("Current state: ");
         switch (g_client_state) {
@@ -151,6 +152,7 @@ int main() {
 
             case STATE_WRITING: {
                 if (pfd.revents & POLLOUT) {
+                    printf("Ping: %d\n", pong);
                     printf("Writing: %s\n", msg);
                     ssize_t sent = send(sockfd, msg, msg_len, 0);
                     if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -171,10 +173,17 @@ int main() {
                     ssize_t n = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
                     if (n > 0) {
                         buffer[(int)n] = '\0';
-                        printf("%zu\n", n);
+                        printf("Pong: %d\n", pong);
+                        printf("Bytes Read: %zu\n", n);
                         printf("Received: %s\n", buffer);
+                        int num_packets = 2000000;//Move this
                         // g_client_state = STATE_DONE;
-                        update_state(STATE_DONE);
+                        if (pong < num_packets) {
+                            pong++;
+                            update_state(STATE_WRITING);
+                        } else {
+                            update_state(STATE_DONE);
+                        }
                     } else if (n == 0) {
                         printf("Server closed connection.\n");
                         // g_client_state = STATE_DONE;
