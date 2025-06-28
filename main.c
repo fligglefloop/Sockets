@@ -112,7 +112,7 @@ int main() {
                 break;
         }
 
-        int ret = poll(&pfd, 1, TIMEOUT_MS);
+        const int ret = poll(&pfd, 1, TIMEOUT_MS);
         if (ret < 0) {
             perror("poll");
             // g_client_state = STATE_ERROR;
