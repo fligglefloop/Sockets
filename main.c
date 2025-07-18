@@ -8,10 +8,17 @@
 #include <sys/socket.h>
 #include <poll.h>
 //#include "Sockets.h"
+#include "ff_File.h"
 
 #define BUFFER_SIZE 1024
 #define TIMEOUT_MS 2
 #define NUM_PACKETS 2
+#define SHOW_TICK 1
+#define DEFAULT_IP "192.168.0.206"
+#define DEFAULT_PORT 50000
+#define DEFAULT_MSG "Hello World!"
+
+//Server, array of client_t, at the start of the tick, loop through poll the read for each.
 
 typedef enum {
     STATE_IDLE = 0,
@@ -21,6 +28,11 @@ typedef enum {
     STATE_DONE,
     STATE_ERROR
 } socket_state_t;
+
+typedef enum {
+    PROCESS_IDLE = 0,
+    PROCESS_WRITING,
+} process_state_t;
 
 const char *socket_state_name[] = {
     [STATE_IDLE] = "IDLE",
@@ -34,105 +46,148 @@ const char *socket_state_name[] = {
 typedef struct {
     int fd;
     struct pollfd pfd;
-    socket_state_t state;
+    socket_state_t sock_state;
 }client_t;
 
-client_t g_socket_state = {0, 0, STATE_IDLE};
+typedef struct {
+    char *ip_addr;
+    int port;
+    int pings;
+    ff_File_t *file;
+}args_t;
 
-int set_nonblocking(int fd) {
+client_t g_client_state = {0, 0, STATE_IDLE};
+args_t g_args;
+
+int set_nonblocking(const int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 void update_state(client_t *client, socket_state_t state) {
-    printf("State change: %s->%s\n", socket_state_name[client->state], socket_state_name[state]);
-    client->state = state;
+    printf("State change: %s->%s\n", socket_state_name[client->sock_state], socket_state_name[state]);
+    client->sock_state = state;
 }
 
-int main(int argc, char **argv) {
-    char *server_ip = "192.168.0.206";
-    int server_port = 50000;
+void handle_args(const int argc, char **argv) {
+    g_args.file = malloc(sizeof(ff_File_t));
+    g_args.file->file_data = malloc(sizeof(char) * BUFFER_SIZE);
+    g_args.ip_addr = DEFAULT_IP;
+    g_args.port = DEFAULT_PORT;
+    g_args.file->file_data = DEFAULT_MSG;
+    g_args.file->file_size = (int)strlen(g_args.file->file_data);
+    g_args.pings = NUM_PACKETS;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-ip") == 0) {
+            g_args.ip_addr = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "-port") == 0) {
+            g_args.port = (int)strtol(argv[++i], NULL, 10);
+            continue;
+        }
+        if (strcmp(argv[i], "-file") == 0) {
+            ff_File_t *file_date = readFile(argv[++i]);
+            if (file_date) {
+                g_args.file = file_date;
+                continue;
+            }
+        }
+        if (strcmp(argv[i], "-pings") == 0) {
+            g_args.pings = (int)strtol(argv[++i], NULL, 10);
+            continue;
+        }
+    }
+    if (SHOW_TICK) {
+        printf("FINAL ARGS::\n"
+               "IP: %s\n"
+               "PORT: %d\n"
+               "PINGS: %d\n"
+               "File_Size: %d\n",
+               g_args.ip_addr,
+               g_args.port,
+               g_args.pings,
+               g_args.file->file_size);
+    }
+}
+
+
+int main(const int argc, char **argv) {
     struct sockaddr_in server_addr;
     int pong = 1;
-    int base_args = 1;
     char buffer[BUFFER_SIZE] = {0};
-    const char *msg = "KEGWEL8,nZMj}T7h3b0!rhS?ur[h7.vW*]7hpvb7{&56nrZ]EZjpTc0))m}$P8L}u1(ZA!c}x!+}X.iqbndPgTbvuLQM,a]3Q&V&wcA0v$PvE*QP1M!npYKNr8:c4]/L/wwLqH/;bytq.M!uUh9Q{2ka}{wFqx-2dPJHV0);,Cfi.qmLBHQq)aT)J5cz]S[*HCVgzA,K)dBAHk2$nCnpqEUYjr&wat:*[Kn1hHP(ad#w5LYr{3DU[)cM:3dAh8e$U-JzXtGC%0dS,d;QrQ-x*1b3YwVYxggSTnaG&Zt*3G0q%nx%;hmK7fkadNp?rc,jY+Kk-}/e/WA/tbjNcR/bNTA}N5J8*Fi}pAgF;NXx4H.+t8[@Q{9(r@F0-C&p2c(A/7B&bLXfwPnc9[XGB&9v$)jAPEbJX5:G]%=Kcep.*e?_8}XW%gQ;z3A?0wF([@*TnuDXJ5M);Va$?uihYQTGuvXLd8K=mD-18-#wR-iT)GQu9TvjhAY-DX!79n4:kwX(H4/_kg4Z[xfqRnJeh!LGqXr,Ygtkq78{vWTueKzynRrdt8@SCBR$E$5fPy9=D:t+#[N2!f2x4mi{9AN@_v%{)2XiH&;Y{Rpn:jx?[U47@ku4TS(qchFEnJKx#dyhRJ4K.P%i&igmKGFiGMErwz=U3RM8SF_Kh!E%A$=9BZkF$NFfQ93;k4.f_wjLkh({%AqJg@p5-tQ9rCx!&Z&Q@L6W,_.&)%D+:hP(8!S*xmdhmU9tFtA@7c8Y9:]/nNaE9V}+Bqq11G#Ci,*kL[Xe:!Ngb,LyXSnmZVz#)iWPjB?b9LyREt$w/wk-FNZm/T&JZ.bDKjHQ.dQ:nw#}$?C,$G(Z:ak:F8B0)&i@(n9vRcpG:CS]Ewix)GkL-A+?M(W%0iH&QbHhD}aS5,FLy3zFdqf64B_}di!fydzw]K{0,rZ/Dyv@N.R*yHuc5kz&+rk].-PrDN_FFU38B&;*Sq60HBmC_@?q7pNLUq;rS:p@S_]nm]P#AfgBp,T*t#{xy8F:z3W:S?@UrzZz&6}fa,w]HXTB.iL3z1n11+2?e]wDZzfH,UDFp@$U;M,-6GtZ1217:c1.wz4(*_neZ}v-#4mAAMcFAPP=9pG/Q+@/xzhZX&/S-$vL0)g4m$kgCcQ%$_1]9*RbqFQi3]Bcta5)68eE[6,ADZ[Lzik=Q0HAr{pmat:)?a&nZJ6x{F#Ldv)=2b)Sp*M*&0Mt62:@SgT;[x2GZQ)B-_Hyn@]GT{8RA;X]@#NPJ6j0;MQ;tDbY{{ZmT0xjbFq;fk$WcB,uMvu&0.+Mmx:RZ{qQ-[8B72VS#gu4vN.f*Jn)vZ80L)MeK*@Mi&F*q01DpYC6(k69f9zL#0dkiTj&]_v&TCzpVQz[$xxycH*i8GR$cxM5Ki47xE$j";
-    ssize_t msg_len = strlen(msg);
     int connect_started = 0;
-    int num_packets = NUM_PACKETS;
+    int bytes_wrote = 0;
+    handle_args(argc, argv);
 
-    // Handle cli args
-    if (argc > base_args) {
-        server_ip = argv[1];
-        server_port = atoi(argv[2]);
-        num_packets = atoi(argv[3]);
-    }
-
-    printf("Server ip: %s\n", server_ip);
-    printf("Server port: %d\n\n", server_port);
+    printf("Server ip: %s\n", g_args.ip_addr);
+    printf("Server port: %d\n\n", g_args.port);
 
     // Create socket
-    g_socket_state.fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_socket_state.fd < 0) {
+    g_client_state.fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (g_client_state.fd < 0) {
         perror("socket");
         return EXIT_FAILURE;
     }
 
     // Set non-blocking
-    if (set_nonblocking(g_socket_state.fd) < 0) {
+    if (set_nonblocking(g_client_state.fd) < 0) {
         perror("fcntl");
-        close(g_socket_state.fd);
+        close(g_client_state.fd);
         return EXIT_FAILURE;
     }
 
     // Setup server address
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(server_port);
-    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) < 1) {
+    server_addr.sin_port = htons(g_args.port);
+    if (inet_pton(AF_INET, g_args.ip_addr, &server_addr.sin_addr) < 1) {
         perror("inet_pton");
         exit(EXIT_FAILURE);
     }
 
     // Update state to start machine
-    g_socket_state.pfd.fd = g_socket_state.fd;
-    update_state(&g_socket_state, STATE_CONNECTING);
-    while (g_socket_state.state != STATE_DONE && g_socket_state.state != STATE_ERROR) {
-        switch (g_socket_state.state) {
+    g_client_state.pfd.fd = g_client_state.fd;
+    update_state(&g_client_state, STATE_CONNECTING);
+    while (g_client_state.sock_state != STATE_DONE && g_client_state.sock_state != STATE_ERROR) {
+        if (SHOW_TICK) {
+            printf("Tick...\n");
+        }
+        switch (g_client_state.sock_state) {
             case STATE_CONNECTING:
                 if (!connect_started) {
-                    int ret = connect(g_socket_state.fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+                    const int ret = connect(g_client_state.fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
                     if (ret < 0) {
                         if (errno != EINPROGRESS) {
                             perror("connect");
                             // g_client_state = STATE_ERROR;
-                            update_state(&g_socket_state, STATE_ERROR);
+                            update_state(&g_client_state, STATE_ERROR);
                             break;
                         }
                         // EINPROGRESS is OK
                     }
                     connect_started = 1;
                 }
-                g_socket_state.pfd.events = POLLOUT;
+                g_client_state.pfd.events = POLLOUT;
                 break;
 
             case STATE_WRITING:
-                g_socket_state.pfd.events = POLLOUT;
+                g_client_state.pfd.events = POLLOUT;
                 break;
 
             case STATE_READING:
-                g_socket_state.pfd.events = POLLIN;
+                g_client_state.pfd.events = POLLIN;
                 break;
 
             default:
-                g_socket_state.pfd.events = 0;
+                g_client_state.pfd.events = 0;
                 break;
         }
 
         // Poll socket
-        const int ret = poll(&g_socket_state.pfd, 1, TIMEOUT_MS);
+        const int ret = poll(&g_client_state.pfd, 1, TIMEOUT_MS);
         if (ret < 0) {
             perror("poll");
-            update_state(&g_socket_state, STATE_ERROR);
+            update_state(&g_client_state, STATE_ERROR);
             break;
         }else if (ret == 0) {
             // Timeout: no events, but engine stays alive
@@ -142,72 +197,78 @@ int main(int argc, char **argv) {
         }
 
         // Check for error events
-        if (g_socket_state.pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        if (g_client_state.pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
             fprintf(stderr, "Socket error or hangup\n");
             // g_client_state = STATE_ERROR;
-            update_state(&g_socket_state, STATE_ERROR);
+            update_state(&g_client_state, STATE_ERROR);
             break;
         }
 
         // Handle socket event
-        switch (g_socket_state.state) {
+        switch (g_client_state.sock_state) {
             case STATE_CONNECTING: {
-                if (g_socket_state.pfd.revents & POLLOUT) {
+                if (g_client_state.pfd.revents & POLLOUT) {
                     int err = 0;
                     socklen_t len = sizeof(err);
-                    if (getsockopt(g_socket_state.fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0) {
+                    if (getsockopt(g_client_state.fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0) {
                         fprintf(stderr, "Connect failed: %s\n", strerror(err));
                         // g_client_state = STATE_ERROR;
-                        update_state(&g_socket_state, STATE_ERROR);
+                        update_state(&g_client_state, STATE_ERROR);
                     } else {
                         // g_client_state = STATE_WRITING;
-                        update_state(&g_socket_state, STATE_WRITING);
+                        update_state(&g_client_state, STATE_WRITING);
                     }
                 }
                 break;
             }
 
             case STATE_WRITING: {
-                if (g_socket_state.pfd.revents & POLLOUT) {
+                if (g_client_state.pfd.revents & POLLOUT) {
                     printf("Ping: %d\n", pong);
-                    printf("Writing: %s\n", msg);
-                    ssize_t sent = send(g_socket_state.fd, msg, msg_len, 0);
+                    printf("Writing: %s\n", "...");
+                    ssize_t sent = send(g_client_state.fd, g_args.file->file_data + bytes_wrote, g_args.file->file_size - bytes_wrote, MSG_DONTWAIT);
                     if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
                         perror("send");
                         // g_client_state = STATE_ERROR;
-                        update_state(&g_socket_state, STATE_ERROR);
+                        update_state(&g_client_state, STATE_ERROR);
                     } else {
                         printf("Bytes wrote: %zu\n", sent);
-                        // g_client_state = STATE_READING;
-                        update_state(&g_socket_state, STATE_READING);
+                        bytes_wrote += (int)sent;
+                        if (bytes_wrote < g_args.file->file_size) {
+                            pong--;
+                        }
+                        else {
+                            bytes_wrote = 0;
+                        }
+                        update_state(&g_client_state, STATE_READING);
                     }
                 }
                 break;
             }
 
             case STATE_READING: {
-                if (g_socket_state.pfd.revents & POLLIN) {
-                    ssize_t n = recv(g_socket_state.fd, buffer, BUFFER_SIZE - 1, 0);
+                if (g_client_state.pfd.revents & POLLIN) {
+                    ssize_t n = recv(g_client_state.fd, buffer, BUFFER_SIZE - 1, MSG_DONTWAIT);
                     if (n > 0) {
                         buffer[(int)n] = '\0';
                         printf("Pong: %d\n", pong);
                         printf("Bytes read: %zu\n", n);
                         printf("Received: %s\n", buffer);
                         // g_client_state = STATE_DONE;
-                        if (pong < num_packets) {
+                        if (pong < g_args.pings) {
                             pong++;
-                            update_state(&g_socket_state, STATE_WRITING);
+                            update_state(&g_client_state, STATE_WRITING);
                         } else {
-                            update_state(&g_socket_state, STATE_DONE);
+                            update_state(&g_client_state, STATE_DONE);
                         }
                     } else if (n == 0) {
                         printf("Server closed connection.\n");
                         // g_client_state = STATE_DONE;
-                        update_state(&g_socket_state, STATE_DONE);
+                        update_state(&g_client_state, STATE_DONE);
                     } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
                         perror("recv");
                         // g_client_state = STATE_ERROR;
-                        update_state(&g_socket_state, STATE_ERROR);
+                        update_state(&g_client_state, STATE_ERROR);
                     }
                 }
                 break;
@@ -218,7 +279,8 @@ int main(int argc, char **argv) {
         }
     }
     // Clean up
-    close(g_socket_state.fd);
-    printf("Client exited with state: %s\n", g_socket_state.state == STATE_DONE ? "DONE" : "ERROR");
-    return (g_socket_state.state == STATE_DONE) ? EXIT_SUCCESS : EXIT_FAILURE;
+    close(g_client_state.fd);
+    free(g_args.file);
+    printf("Client exited with state: %s\n", g_client_state.sock_state == STATE_DONE ? "DONE" : "ERROR");
+    return (g_client_state.sock_state == STATE_DONE) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
